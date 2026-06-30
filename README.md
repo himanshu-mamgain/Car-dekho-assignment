@@ -4,6 +4,16 @@ A full-stack car research platform: search ~1,200 cars by make, body type, fuel
 type, transmission, seating capacity and price, view full spec sheets, and
 compare two cars side by side.
 
+## Quick start
+
+```bash
+docker compose up --build
+```
+
+Then open [http://localhost:8080](http://localhost:8080). All env vars have
+sane defaults, so no `.env` file is required to try it out — see
+[Environment variables](#environment-variables) to customize.
+
 ## About
 
 The dataset (`cars_ds_final.csv` + `cars_ds_final_2021.csv`) contains ~140
