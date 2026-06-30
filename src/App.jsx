@@ -1,154 +1,196 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import './App.css'
+import { getFilters, searchCars, getCar, compareCars } from './api/cars'
+import { ApiError } from './api/client'
+import { useDebouncedValue } from './hooks/useDebouncedValue'
+import FilterPanel from './components/FilterPanel'
+import CarResultsTable from './components/CarResultsTable'
+import CompareView from './components/CompareView'
+import CarDetailView from './components/CarDetailView'
+import ErrorBanner from './components/ErrorBanner'
 
-const CAR_DATABASE = [
-  { brand: 'Maruti Suzuki', model: 'Swift', fuelType: 'Petrol', year: 2023, price: 650000 },
-  { brand: 'Maruti Suzuki', model: 'Baleno', fuelType: 'Petrol', year: 2022, price: 750000 },
-  { brand: 'Hyundai', model: 'Creta', fuelType: 'Diesel', year: 2023, price: 1500000 },
-  { brand: 'Hyundai', model: 'i20', fuelType: 'Petrol', year: 2021, price: 800000 },
-  { brand: 'Tata', model: 'Nexon', fuelType: 'Electric', year: 2023, price: 1450000 },
-  { brand: 'Tata', model: 'Punch', fuelType: 'Petrol', year: 2022, price: 700000 },
-  { brand: 'Honda', model: 'City', fuelType: 'Petrol', year: 2023, price: 1300000 },
-  { brand: 'Honda', model: 'Amaze', fuelType: 'Diesel', year: 2021, price: 900000 },
-  { brand: 'Toyota', model: 'Innova Crysta', fuelType: 'Diesel', year: 2022, price: 2200000 },
-  { brand: 'Toyota', model: 'Fortuner', fuelType: 'Diesel', year: 2023, price: 3800000 },
-  { brand: 'Mahindra', model: 'XUV700', fuelType: 'Diesel', year: 2023, price: 2400000 },
-  { brand: 'Kia', model: 'Seltos', fuelType: 'Petrol', year: 2022, price: 1600000 },
-]
+const EMPTY_FILTERS = {
+  query: '',
+  make: '',
+  bodyType: '',
+  fuelType: '',
+  transmission: '',
+  minPrice: '',
+  maxPrice: '',
+  seatingCapacity: '',
+}
 
-const BRANDS = [...new Set(CAR_DATABASE.map((c) => c.brand))]
-const FUEL_TYPES = [...new Set(CAR_DATABASE.map((c) => c.fuelType))]
+const EMPTY_FILTER_OPTIONS = { makes: [], bodyTypes: [], fuelTypes: [], transmissions: [] }
+
+const PAGE_LIMIT = 20
+
+function errorMessage(err) {
+  if (err instanceof ApiError) return err.message
+  return 'Something went wrong. Please try again.'
+}
 
 function App() {
-  const [filters, setFilters] = useState({
-    brand: '',
-    model: '',
-    fuelType: '',
-    minPrice: '',
-    maxPrice: '',
-  })
-  const [results, setResults] = useState(null)
+  const [filters, setFilters] = useState(EMPTY_FILTERS)
+  const [page, setPage] = useState(1)
+  const debouncedQuery = useDebouncedValue(filters.query, 300)
 
-  const handleChange = (e) => {
-    const { name, value } = e.target
-    setFilters((prev) => ({ ...prev, [name]: value }))
-  }
+  const [filterOptions, setFilterOptions] = useState(EMPTY_FILTER_OPTIONS)
+  const [filterOptionsError, setFilterOptionsError] = useState(null)
 
-  const handleSearch = (e) => {
-    e.preventDefault()
-    const filtered = CAR_DATABASE.filter((car) => {
-      if (filters.brand && car.brand !== filters.brand) return false
-      if (filters.model && !car.model.toLowerCase().includes(filters.model.toLowerCase())) return false
-      if (filters.fuelType && car.fuelType !== filters.fuelType) return false
-      if (filters.minPrice && car.price < Number(filters.minPrice)) return false
-      if (filters.maxPrice && car.price > Number(filters.maxPrice)) return false
-      return true
+  const [searchResult, setSearchResult] = useState(null)
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchError, setSearchError] = useState(null)
+
+  const [selectedForCompare, setSelectedForCompare] = useState([])
+  const [compareResult, setCompareResult] = useState(null)
+  const [compareError, setCompareError] = useState(null)
+  const [compareLoading, setCompareLoading] = useState(false)
+
+  const [detailCarId, setDetailCarId] = useState(null)
+  const [detailCar, setDetailCar] = useState(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState(null)
+
+  const filterSignature = [
+    filters.make,
+    filters.bodyType,
+    filters.fuelType,
+    filters.transmission,
+    filters.minPrice,
+    filters.maxPrice,
+    filters.seatingCapacity,
+    debouncedQuery,
+  ].join('|')
+
+  const loadFilterOptions = useCallback(() => {
+    setFilterOptionsError(null)
+    getFilters()
+      .then(setFilterOptions)
+      .catch((err) => setFilterOptionsError(errorMessage(err)))
+  }, [])
+
+  useEffect(() => {
+    loadFilterOptions()
+  }, [loadFilterOptions])
+
+  useEffect(() => {
+    setPage(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterSignature])
+
+  const runSearch = useCallback(() => {
+    setSearchLoading(true)
+    setSearchError(null)
+    searchCars({
+      query: debouncedQuery,
+      make: filters.make,
+      bodyType: filters.bodyType,
+      fuelType: filters.fuelType,
+      transmission: filters.transmission,
+      minPrice: filters.minPrice,
+      maxPrice: filters.maxPrice,
+      seatingCapacity: filters.seatingCapacity,
+      page,
+      limit: PAGE_LIMIT,
     })
-    setResults(filtered)
+      .then(setSearchResult)
+      .catch((err) => setSearchError(errorMessage(err)))
+      .finally(() => setSearchLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterSignature, page])
+
+  useEffect(() => {
+    runSearch()
+  }, [runSearch])
+
+  const handleFilterChange = (partial) => {
+    setFilters((prev) => ({ ...prev, ...partial }))
   }
 
   const handleReset = () => {
-    setFilters({ brand: '', model: '', fuelType: '', minPrice: '', maxPrice: '' })
-    setResults(null)
+    setFilters(EMPTY_FILTERS)
+    setSelectedForCompare([])
+    setCompareResult(null)
+  }
+
+  const handleToggleCompare = (carId) => {
+    setSelectedForCompare((prev) => {
+      if (prev.includes(carId)) return prev.filter((id) => id !== carId)
+      if (prev.length >= 2) return prev
+      return [...prev, carId]
+    })
+  }
+
+  const handleCompare = () => {
+    if (selectedForCompare.length !== 2) return
+    const [firstId, secondId] = selectedForCompare
+    setCompareLoading(true)
+    setCompareError(null)
+    compareCars(firstId, secondId)
+      .then(setCompareResult)
+      .catch((err) => setCompareError(errorMessage(err)))
+      .finally(() => setCompareLoading(false))
+  }
+
+  const handleViewDetails = (carId) => {
+    setDetailCarId(carId)
+    setDetailLoading(true)
+    setDetailError(null)
+    setDetailCar(null)
+    getCar(carId)
+      .then(setDetailCar)
+      .catch((err) => setDetailError(errorMessage(err)))
+      .finally(() => setDetailLoading(false))
   }
 
   return (
     <div className="page">
       <h1>Car Research Platform</h1>
 
-      <form className="search-form" onSubmit={handleSearch}>
-        <div className="field">
-          <label htmlFor="brand">Brand</label>
-          <select id="brand" name="brand" value={filters.brand} onChange={handleChange}>
-            <option value="">Any</option>
-            {BRANDS.map((b) => (
-              <option key={b} value={b}>{b}</option>
-            ))}
-          </select>
-        </div>
+      <ErrorBanner message={filterOptionsError} onRetry={loadFilterOptions} />
 
-        <div className="field">
-          <label htmlFor="model">Model</label>
-          <input
-            id="model"
-            name="model"
-            type="text"
-            placeholder="e.g. Swift"
-            value={filters.model}
-            onChange={handleChange}
-          />
-        </div>
+      <FilterPanel
+        filters={filters}
+        filterOptions={filterOptions}
+        onChange={handleFilterChange}
+        onReset={handleReset}
+      />
 
-        <div className="field">
-          <label htmlFor="fuelType">Fuel Type</label>
-          <select id="fuelType" name="fuelType" value={filters.fuelType} onChange={handleChange}>
-            <option value="">Any</option>
-            {FUEL_TYPES.map((f) => (
-              <option key={f} value={f}>{f}</option>
-            ))}
-          </select>
-        </div>
+      <div className="compare-bar">
+        <span>{selectedForCompare.length}/2 selected for comparison</span>
+        <button type="button" disabled={selectedForCompare.length !== 2 || compareLoading} onClick={handleCompare}>
+          {compareLoading ? 'Comparing...' : 'Compare'}
+        </button>
+      </div>
 
-        <div className="field">
-          <label htmlFor="minPrice">Min Price (₹)</label>
-          <input
-            id="minPrice"
-            name="minPrice"
-            type="number"
-            min="0"
-            placeholder="0"
-            value={filters.minPrice}
-            onChange={handleChange}
-          />
-        </div>
+      <ErrorBanner message={searchError} onRetry={runSearch} />
 
-        <div className="field">
-          <label htmlFor="maxPrice">Max Price (₹)</label>
-          <input
-            id="maxPrice"
-            name="maxPrice"
-            type="number"
-            min="0"
-            placeholder="No limit"
-            value={filters.maxPrice}
-            onChange={handleChange}
-          />
-        </div>
+      <CarResultsTable
+        loading={searchLoading}
+        error={searchError}
+        searchResult={searchResult}
+        selectedForCompare={selectedForCompare}
+        onToggleCompare={handleToggleCompare}
+        onPageChange={setPage}
+        onViewDetails={handleViewDetails}
+      />
 
-        <div className="actions">
-          <button type="submit">Search</button>
-          <button type="button" onClick={handleReset}>Reset</button>
-        </div>
-      </form>
+      {compareError && (
+        <ErrorBanner message={compareError} onRetry={handleCompare} />
+      )}
 
-      <section className="results">
-        {results === null && <p className="hint">Enter your search criteria and click Search.</p>}
-        {results !== null && results.length === 0 && <p className="hint">No cars match your search.</p>}
-        {results !== null && results.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th>Brand</th>
-                <th>Model</th>
-                <th>Fuel Type</th>
-                <th>Year</th>
-                <th>Price (₹)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((car, idx) => (
-                <tr key={idx}>
-                  <td>{car.brand}</td>
-                  <td>{car.model}</td>
-                  <td>{car.fuelType}</td>
-                  <td>{car.year}</td>
-                  <td>{car.price.toLocaleString('en-IN')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+      {compareResult && (
+        <CompareView compareResult={compareResult} onClose={() => setCompareResult(null)} />
+      )}
+
+      {detailCarId && (
+        <CarDetailView
+          car={detailCar}
+          loading={detailLoading}
+          error={detailError}
+          onClose={() => setDetailCarId(null)}
+        />
+      )}
     </div>
   )
 }
